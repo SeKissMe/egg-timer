@@ -2,288 +2,294 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>完美水煮蛋計時器 - Perfect Egg Timer</title>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>完美水煮蛋計時器 🥚</title>
+    <!-- 引入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        * {
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@500;900&display=swap');
+
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f9fafb;
             margin: 0;
             padding: 0;
-            box-sizing: border-box;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overscroll-behavior-y: contain;
         }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
-        }
+        .font-mono { font-family: 'JetBrains+Mono', monospace; }
+        
+        /* 避免長按圖片彈出選單 */
+        img, canvas { -webkit-touch-callout: none; pointer-events: none; }
+        
+        .transition-opacity { transition: opacity 0.7s ease; }
     </style>
 </head>
 <body>
-    <div id="root"></div>
 
-    <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
-        const { Play, Pause, RotateCcw, SkipForward, RefreshCcw } = lucide;
+    <div id="app" class="w-full max-w-sm bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col border border-gray-100 m-4">
+        <!-- 標題區 -->
+        <div class="pt-6 pb-2 text-center">
+            <h1 class="text-2xl font-[900] text-gray-800 tracking-tight">完美水煮蛋 🥚</h1>
+        </div>
 
-        const App = () => {
-            // --- 素材與參數設定 ---
-            const HOT_VIDEO_URL = "https://res.cloudinary.com/dcoswk3cu/video/upload/v1/A148AC21-F390-40B5-BB35-F427316EB68C_wai3kr.mp4";
-            const COLD_IMAGE_URL = "https://duk.tw/Qsxbq6.png";
-            const STEP_TIME = 120; // 2分鐘
-            const TOTAL_CYCLES = 8;
+        <!-- 視覺展示窗 -->
+        <div id="visual-container" class="mx-5 aspect-[16/10] rounded-3xl relative overflow-hidden transition-all duration-700 border-4 border-orange-500 bg-gray-50 shadow-inner">
+            <img id="cold-img" src="https://duk.tw/Qsxbq6.png" class="absolute inset-0 w-full h-full object-contain transition-opacity opacity-0 z-0" />
+            <canvas id="hot-canvas" class="absolute inset-0 w-full h-full object-contain transition-opacity opacity-100 z-10"></canvas>
+            
+            <div id="phase-tag" class="absolute top-3 left-3 px-3 py-1 rounded-full text-[9px] font-black text-white z-20 shadow-sm uppercase tracking-widest bg-orange-600">
+                100°C
+            </div>
+        </div>
 
-            // --- 狀態管理 ---
-            const [timeLeft, setTimeLeft] = useState(STEP_TIME);
-            const [currentCycle, setCurrentCycle] = useState(1);
-            const [isHot, setIsHot] = useState(true);
-            const [isRunning, setIsRunning] = useState(false);
-            const [isFinished, setIsFinished] = useState(false);
-            const [isVideoUnlocked, setIsVideoUnlocked] = useState(false);
-
-            const videoRef = useRef(null);
-            const canvasRef = useRef(null);
-            const timerRef = useRef(null);
-            const scrubTimeRef = useRef(0);
-            const lastTimestampRef = useRef(0);
-
-            // --- 核心：Canvas 手動撥幀引擎 ---
-            useEffect(() => {
-                // 建立一個僅存在於記憶體的影片元件
-                const video = document.createElement('video');
-                video.src = HOT_VIDEO_URL;
-                video.muted = true;
-                video.playsInline = true;
-                video.crossOrigin = "anonymous";
-                video.preload = "auto";
-                video.setAttribute('webkit-playsinline', 'true');
-                videoRef.current = video;
-
-                const render = (timestamp) => {
-                    if (isRunning && isHot && !isFinished) {
-                        if (!lastTimestampRef.current) lastTimestampRef.current = timestamp;
-                        const delta = (timestamp - lastTimestampRef.current) / 1000;
-                        lastTimestampRef.current = timestamp;
-
-                        // 循環前 3 秒影片內容
-                        scrubTimeRef.current = (scrubTimeRef.current + delta) % 3;
-                        
-                        const v = videoRef.current;
-                        if (v && v.readyState >= 2) {
-                            // 關鍵：手動設定進度點但不呼叫 .play()
-                            v.currentTime = scrubTimeRef.current;
-                            
-                            const canvas = canvasRef.current;
-                            if (canvas) {
-                                const ctx = canvas.getContext('2d');
-                                if (canvas.width !== v.videoWidth) {
-                                    canvas.width = v.videoWidth;
-                                    canvas.height = v.videoHeight;
-                                }
-                                ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-                            }
-                        }
-                    } else {
-                        lastTimestampRef.current = 0;
-                    }
-                    requestRef.current = requestAnimationFrame(render);
-                };
-
-                const requestRef = { current: requestAnimationFrame(render) };
-                return () => {
-                    cancelAnimationFrame(requestRef.current);
-                    if (videoRef.current) videoRef.current.src = "";
-                };
-            }, [isRunning, isHot, isFinished]);
-
-            // --- 計時器邏輯 ---
-            useEffect(() => {
-                if (isRunning && timeLeft > 0) {
-                    timerRef.current = setInterval(() => {
-                        setTimeLeft(prev => prev - 1);
-                    }, 1000);
-                } else if (timeLeft === 0) {
-                    handleStepEnd();
-                }
-                return () => clearInterval(timerRef.current);
-            }, [isRunning, timeLeft]);
-
-            const handleStepEnd = () => {
-                playNotification();
-                if (isHot) {
-                    setIsHot(false);
-                    setTimeLeft(STEP_TIME);
-                } else {
-                    if (currentCycle < TOTAL_CYCLES) {
-                        setCurrentCycle(prev => prev + 1);
-                        setIsHot(true);
-                        setTimeLeft(STEP_TIME);
-                    } else {
-                        setIsFinished(true);
-                        setIsRunning(false);
-                    }
-                }
-            };
-
-            const playNotification = () => {
-                try {
-                    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                    const osc = audioCtx.createOscillator();
-                    const gain = audioCtx.createGain();
-                    osc.connect(gain); gain.connect(audioCtx.destination);
-                    osc.type = 'sine';
-                    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
-                    osc.start(); osc.stop(audioCtx.currentTime + 0.5);
-                } catch (e) {}
-            };
-
-            // 切換開始/暫停
-            const toggleTimer = () => {
-                if (isFinished) {
-                    restartEverything();
-                    return;
-                }
-
-                // 解決行動裝置「動畫不動」的關鍵：第一次點擊時啟動解碼引擎
-                if (!isVideoUnlocked && videoRef.current) {
-                    const v = videoRef.current;
-                    v.play().then(() => {
-                        v.pause(); // 立即暫停，系統會因此允許後續的進度撥動
-                        setIsVideoUnlocked(true);
-                    }).catch(e => console.log("Engine unlock needed"));
-                }
-
-                setIsRunning(!isRunning);
-            };
-
-            // 只重設目前的步驟 (2分鐘)
-            const resetCurrentStep = () => {
-                setTimeLeft(STEP_TIME);
-                scrubTimeRef.current = 0;
-            };
-
-            // 全面重新開始 (從第 1 次循環開始)
-            const restartEverything = () => {
-                setIsRunning(false);
-                setIsHot(true);
-                setCurrentCycle(1);
-                setTimeLeft(STEP_TIME);
-                setIsFinished(false);
-                scrubTimeRef.current = 0;
-                // 確保回到初始狀態後，進度條同步重設
-            };
-
-            const skipStep = () => {
-                handleStepEnd();
-            };
-
-            const formatTime = (s) => {
-                const m = Math.floor(s / 60);
-                const sec = s % 60;
-                return `${m}:${sec.toString().padStart(2, '0')}`;
-            };
-
-            return (
-                <div className="min-h-screen bg-gray-100 flex items-center justify-center p-2 font-sans overflow-hidden">
-                    <div className="w-full max-w-sm bg-white rounded-[2.5rem] shadow-xl overflow-hidden flex flex-col border border-gray-200">
-                        
-                        {/* 標題 */}
-                        <div className="pt-6 pb-2 text-center">
-                            <h1 className="text-2xl font-black text-gray-800 tracking-tight">
-                                完美水煮蛋 🥚
-                            </h1>
-                        </div>
-
-                        {/* 視覺展示窗 */}
-                        <div className={`mx-5 aspect-[16/10] rounded-3xl relative overflow-hidden transition-all duration-500 border-4 ${
-                            isFinished ? 'border-emerald-500' : (isHot ? 'border-orange-500' : 'border-sky-400')
-                        } bg-gray-50`}>
-                            
-                            <img 
-                                src={COLD_IMAGE_URL} 
-                                className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-500 ${(!isHot || isFinished) ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}
-                                alt="Cold phase"
-                            />
-
-                            <canvas 
-                                ref={canvasRef}
-                                className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-500 ${(isHot && !isFinished) ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}
-                            />
-
-                            <div className={`absolute top-3 left-3 px-3 py-1 rounded-full text-[9px] font-black text-white z-20 shadow-sm uppercase tracking-widest ${
-                                isFinished ? 'bg-emerald-500' : (isHot ? 'bg-orange-600' : 'bg-sky-500')
-                            }`}>
-                                {isFinished ? 'Success' : (isHot ? '100°C' : '30°C')}
-                            </div>
-                        </div>
-
-                        {/* 狀態資訊 */}
-                        <div className="px-6 py-4 text-center">
-                            <div className="flex flex-col items-center">
-                                <div className="bg-gray-100 text-gray-500 text-[9px] font-black px-3 py-1 rounded-full mb-2 tracking-widest uppercase">
-                                    Cycle {currentCycle} / {TOTAL_CYCLES}
-                                </div>
-                                
-                                <h2 className={`text-lg font-bold mb-1 ${isFinished ? 'text-emerald-600' : 'text-gray-700'}`}>
-                                    {isFinished ? '烹飪完成！' : (isHot ? '🔥 加熱中' : '❄️ 冷卻中')}
-                                </h2>
-                                
-                                <div className="text-6xl font-mono font-black text-gray-800 leading-none my-4 tracking-tighter">
-                                    {isFinished ? 'DONE' : formatTime(timeLeft)}
-                                </div>
-                            </div>
-
-                            {/* 按鈕組 */}
-                            <div className="space-y-3">
-                                <button 
-                                    onClick={toggleTimer}
-                                    className={`w-full py-4 rounded-2xl flex items-center justify-center gap-2 text-white font-black text-xl shadow-lg active:scale-95 transition-all ${
-                                        isFinished ? 'bg-emerald-500' : (isRunning ? 'bg-amber-500' : 'bg-orange-500')
-                                    }`}
-                                >
-                                    {isRunning ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
-                                    {isFinished ? '重新開始' : (isRunning ? '暫停' : '開始計時')}
-                                </button>
-                                
-                                <div className="grid grid-cols-2 gap-3">
-                                    <button 
-                                        onClick={resetCurrentStep}
-                                        className="py-3 rounded-xl bg-gray-50 text-gray-500 font-bold border border-gray-200 active:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-sm"
-                                    >
-                                        <RefreshCcw size={16} /> 重設此段
-                                    </button>
-                                    <button 
-                                        onClick={skipStep}
-                                        disabled={isFinished}
-                                        className="py-3 rounded-xl bg-gray-50 text-gray-500 font-bold border border-gray-200 flex items-center justify-center gap-2 text-sm disabled:opacity-30"
-                                    >
-                                        <SkipForward size={16} fill="currentColor" /> 跳過
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* 底部進度條 */}
-                        <div className="px-8 pb-6 flex gap-1">
-                            {[...Array(TOTAL_CYCLES)].map((_, i) => (
-                                <div 
-                                    key={i} 
-                                    className={`h-1.5 flex-1 rounded-full transition-all duration-1000 ${
-                                        i + 1 < currentCycle ? 'bg-emerald-500' : 
-                                        (i + 1 === currentCycle && !isFinished ? 'bg-orange-400 animate-pulse' : 
-                                        (isFinished ? 'bg-emerald-400' : 'bg-gray-200'))
-                                    }`}
-                                />
-                            ))}
-                        </div>
-                    </div>
+        <!-- 資訊與按鈕區 -->
+        <div class="px-6 py-4 text-center">
+            <div class="flex flex-col items-center">
+                <div id="cycle-label" class="bg-gray-100 text-gray-400 text-[9px] font-black px-3 py-1 rounded-full mb-3 tracking-widest uppercase">
+                    Cycle 1 / 8
                 </div>
-            );
+                <h2 id="status-text" class="text-lg font-bold mb-1 text-gray-700">🔥 熱水加熱中</h2>
+                <div id="timer-display" class="text-6xl font-mono font-black text-gray-800 leading-none my-4 tracking-tighter drop-shadow-sm">
+                    02:00
+                </div>
+            </div>
+
+            <!-- 控制按鈕組 -->
+            <div class="space-y-3">
+                <button id="main-btn" class="w-full py-4 rounded-2xl flex items-center justify-center gap-2 text-white font-black text-xl shadow-lg active:scale-95 transition-all bg-orange-500 shadow-orange-100">
+                    <span id="play-icon"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span>
+                    <span id="main-btn-text">開始煮蛋</span>
+                </button>
+                
+                <div class="grid grid-cols-2 gap-3">
+                    <button id="reset-btn" class="py-3 rounded-xl bg-gray-50 text-gray-500 font-bold border border-gray-100 active:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-xs">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                        重設此段
+                    </button>
+                    <button id="skip-btn" class="py-3 rounded-xl bg-gray-50 text-gray-500 font-bold border border-gray-200 flex items-center justify-center gap-2 text-xs active:bg-gray-100 transition-colors">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+                        跳過
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 進度條 -->
+        <div id="progress-container" class="px-8 pb-6 flex gap-1">
+            <!-- 進度點會由 JS 動態生成 -->
+        </div>
+    </div>
+
+    <script>
+        // --- 設定 ---
+        const HOT_VIDEO_URL = "https://res.cloudinary.com/dcoswk3cu/video/upload/v1/A148AC21-F390-40B5-BB35-F427316EB68C_wai3kr.mp4";
+        const STEP_TIME = 120;
+        const TOTAL_CYCLES = 8;
+
+        // --- 狀態 ---
+        let timeLeft = STEP_TIME;
+        let currentCycle = 1;
+        let isHot = true;
+        let isRunning = false;
+        let isFinished = false;
+        let isVideoUnlocked = false;
+
+        // --- DOM 元素 ---
+        const timerDisplay = document.getElementById('timer-display');
+        const statusText = document.getElementById('status-text');
+        const cycleLabel = document.getElementById('cycle-label');
+        const mainBtn = document.getElementById('main-btn');
+        const mainBtnText = document.getElementById('main-btn-text');
+        const playIconContainer = document.getElementById('play-icon');
+        const visualContainer = document.getElementById('visual-container');
+        const coldImg = document.getElementById('cold-img');
+        const hotCanvas = document.getElementById('hot-canvas');
+        const phaseTag = document.getElementById('phase-tag');
+        const progressContainer = document.getElementById('progress-container');
+        const ctx = hotCanvas.getContext('2d');
+
+        // --- 影片物件 (記憶體中) ---
+        const secretVideo = document.createElement('video');
+        secretVideo.src = HOT_VIDEO_URL;
+        secretVideo.muted = true;
+        secretVideo.playsInline = true;
+        secretVideo.crossOrigin = "anonymous";
+        secretVideo.preload = "auto";
+
+        // --- 圖標 ---
+        const iconPlay = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>';
+        const iconPause = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>';
+
+        // --- 初始化進度條 ---
+        function initProgress() {
+            progressContainer.innerHTML = '';
+            for (let i = 1; i <= TOTAL_CYCLES; i++) {
+                const dot = document.createElement('div');
+                dot.id = `dot-${i}`;
+                dot.className = 'h-1.5 flex-1 rounded-full transition-all duration-1000 bg-gray-200';
+                progressContainer.appendChild(dot);
+            }
+        }
+        initProgress();
+
+        // --- UI 更新 ---
+        function updateUI() {
+            const m = Math.floor(timeLeft / 60);
+            const s = timeLeft % 60;
+            timerDisplay.innerText = isFinished ? "DONE" : `${m}:${s.toString().padStart(2, '0')}`;
+            cycleLabel.innerText = `Cycle ${currentCycle} / ${TOTAL_CYCLES}`;
+
+            // 進度點更新
+            for (let i = 1; i <= TOTAL_CYCLES; i++) {
+                const dot = document.getElementById(`dot-${i}`);
+                if (i < currentCycle || isFinished) {
+                    dot.className = 'h-1.5 flex-1 rounded-full transition-all duration-1000 bg-emerald-500';
+                } else if (i === currentCycle) {
+                    dot.className = 'h-1.5 flex-1 rounded-full transition-all duration-1000 bg-orange-400 animate-pulse';
+                } else {
+                    dot.className = 'h-1.5 flex-1 rounded-full transition-all duration-1000 bg-gray-200';
+                }
+            }
+
+            if (isFinished) {
+                statusText.innerText = "🎉 煮蛋完成！";
+                statusText.className = "text-lg font-bold mb-1 text-emerald-600";
+                mainBtn.className = "w-full py-4 rounded-2xl flex items-center justify-center gap-2 text-white font-black text-xl shadow-lg active:scale-95 transition-all bg-emerald-500 shadow-emerald-100";
+                mainBtnText.innerText = "重新開始";
+                visualContainer.className = "mx-5 aspect-[16/10] rounded-3xl relative overflow-hidden transition-all duration-700 border-4 border-emerald-500 bg-gray-50 shadow-inner";
+                phaseTag.innerText = "SUCCESS";
+                phaseTag.className = "absolute top-3 left-3 px-3 py-1 rounded-full text-[9px] font-black text-white z-20 shadow-sm uppercase tracking-widest bg-emerald-500";
+                coldImg.className = "absolute inset-0 w-full h-full object-contain transition-opacity opacity-100 z-10";
+                hotCanvas.className = "absolute inset-0 w-full h-full object-contain transition-opacity opacity-0 z-0";
+            } else {
+                if (isHot) {
+                    statusText.innerText = "🔥 熱水加熱中";
+                    visualContainer.className = "mx-5 aspect-[16/10] rounded-3xl relative overflow-hidden transition-all duration-700 border-4 border-orange-500 bg-gray-50 shadow-inner shadow-orange-50";
+                    phaseTag.innerText = "100°C";
+                    phaseTag.className = "absolute top-3 left-3 px-3 py-1 rounded-full text-[9px] font-black text-white z-20 shadow-sm uppercase tracking-widest bg-orange-600";
+                    coldImg.className = "absolute inset-0 w-full h-full object-contain transition-opacity opacity-0 z-0";
+                    hotCanvas.className = "absolute inset-0 w-full h-full object-contain transition-opacity opacity-100 z-10";
+                } else {
+                    statusText.innerText = "❄️ 冷水降溫中";
+                    visualContainer.className = "mx-5 aspect-[16/10] rounded-3xl relative overflow-hidden transition-all duration-700 border-4 border-sky-400 bg-gray-50 shadow-inner shadow-sky-50";
+                    phaseTag.innerText = "30°C";
+                    phaseTag.className = "absolute top-3 left-3 px-3 py-1 rounded-full text-[9px] font-black text-white z-20 shadow-sm uppercase tracking-widest bg-sky-500";
+                    coldImg.className = "absolute inset-0 w-full h-full object-contain transition-opacity opacity-100 z-10";
+                    hotCanvas.className = "absolute inset-0 w-full h-full object-contain transition-opacity opacity-0 z-0";
+                }
+
+                if (isRunning) {
+                    mainBtnText.innerText = "暫停計時";
+                    playIconContainer.innerHTML = iconPause;
+                    mainBtn.className = "w-full py-4 rounded-2xl flex items-center justify-center gap-2 text-white font-black text-xl shadow-lg active:scale-95 transition-all bg-amber-500 shadow-amber-100";
+                } else {
+                    mainBtnText.innerText = timeLeft === STEP_TIME && currentCycle === 1 ? "開始煮蛋" : "繼續計時";
+                    playIconContainer.innerHTML = iconPlay;
+                    mainBtn.className = "w-full py-4 rounded-2xl flex items-center justify-center gap-2 text-white font-black text-xl shadow-lg active:scale-95 transition-all bg-orange-500 shadow-orange-100";
+                }
+            }
+        }
+
+        // --- 計時器邏輯 ---
+        setInterval(() => {
+            if (isRunning && timeLeft > 0) {
+                timeLeft--;
+                updateUI();
+                if (timeLeft === 0) handleStepEnd();
+            }
+        }, 1000);
+
+        function handleStepEnd() {
+            playBeep();
+            if (isHot) {
+                isHot = false;
+                timeLeft = STEP_TIME;
+            } else {
+                if (currentCycle < TOTAL_CYCLES) {
+                    currentCycle++;
+                    isHot = true;
+                    timeLeft = STEP_TIME;
+                } else {
+                    isFinished = true;
+                    isRunning = false;
+                }
+            }
+            updateUI();
+        }
+
+        function playBeep() {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.5);
+            } catch (e) {}
+        }
+
+        // --- 動畫渲染 ---
+        let lastTimestamp = 0;
+        let scrubTime = 0;
+
+        function render(timestamp) {
+            if (isRunning && isHot && !isFinished) {
+                if (!lastTimestamp) lastTimestamp = timestamp;
+                const delta = (timestamp - lastTimestamp) / 1000;
+                lastTimestamp = timestamp;
+
+                scrubTime = (scrubTime + delta) % 3;
+                
+                if (secretVideo.readyState >= 2) {
+                    secretVideo.currentTime = scrubTime;
+                    if (hotCanvas.width !== secretVideo.videoWidth) {
+                        hotCanvas.width = secretVideo.videoWidth;
+                        hotCanvas.height = secretVideo.videoHeight;
+                    }
+                    ctx.drawImage(secretVideo, 0, 0, hotCanvas.width, hotCanvas.height);
+                }
+            } else {
+                lastTimestamp = 0;
+            }
+            requestAnimationFrame(render);
+        }
+        requestAnimationFrame(render);
+
+        // --- 控制功能 ---
+        mainBtn.onclick = () => {
+            if (isFinished) {
+                location.reload();
+                return;
+            }
+            // 解鎖影片引擎
+            if (!isVideoUnlocked) {
+                secretVideo.play().then(() => {
+                    secretVideo.pause();
+                    isVideoUnlocked = true;
+                }).catch(() => {});
+            }
+            isRunning = !isRunning;
+            updateUI();
         };
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        document.getElementById('reset-btn').onclick = () => {
+            timeLeft = STEP_TIME;
+            scrubTime = 0;
+            updateUI();
+        };
+
+        document.getElementById('skip-btn').onclick = () => {
+            if (!isFinished) handleStepEnd();
+        };
+
+        updateUI();
     </script>
 </body>
 </html>
