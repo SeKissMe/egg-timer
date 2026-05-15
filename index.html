@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>完美水煮蛋計時器 - Perfect Egg Timer</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        const { Play, Pause, RotateCcw, SkipForward, RefreshCcw } = lucide;
+
+        const App = () => {
+            // --- 素材與參數設定 ---
+            const HOT_VIDEO_URL = "https://res.cloudinary.com/dcoswk3cu/video/upload/v1/A148AC21-F390-40B5-BB35-F427316EB68C_wai3kr.mp4";
+            const COLD_IMAGE_URL = "https://duk.tw/Qsxbq6.png";
+            const STEP_TIME = 120; // 2分鐘
+            const TOTAL_CYCLES = 8;
+
+            // --- 狀態管理 ---
+            const [timeLeft, setTimeLeft] = useState(STEP_TIME);
+            const [currentCycle, setCurrentCycle] = useState(1);
+            const [isHot, setIsHot] = useState(true);
+            const [isRunning, setIsRunning] = useState(false);
+            const [isFinished, setIsFinished] = useState(false);
+            const [isVideoUnlocked, setIsVideoUnlocked] = useState(false);
+
+            const videoRef = useRef(null);
+            const canvasRef = useRef(null);
+            const timerRef = useRef(null);
+            const scrubTimeRef = useRef(0);
+            const lastTimestampRef = useRef(0);
+
+            // --- 核心：Canvas 手動撥幀引擎 ---
+            useEffect(() => {
+                // 建立一個僅存在於記憶體的影片元件
+                const video = document.createElement('video');
+                video.src = HOT_VIDEO_URL;
+                video.muted = true;
+                video.playsInline = true;
+                video.crossOrigin = "anonymous";
+                video.preload = "auto";
+                video.setAttribute('webkit-playsinline', 'true');
+                videoRef.current = video;
+
+                const render = (timestamp) => {
+                    if (isRunning && isHot && !isFinished) {
+                        if (!lastTimestampRef.current) lastTimestampRef.current = timestamp;
+                        const delta = (timestamp - lastTimestampRef.current) / 1000;
+                        lastTimestampRef.current = timestamp;
+
+                        // 循環前 3 秒影片內容
+                        scrubTimeRef.current = (scrubTimeRef.current + delta) % 3;
+                        
+                        const v = videoRef.current;
+                        if (v && v.readyState >= 2) {
+                            // 關鍵：手動設定進度點但不呼叫 .play()
+                            v.currentTime = scrubTimeRef.current;
+                            
+                            const canvas = canvasRef.current;
+                            if (canvas) {
+                                const ctx = canvas.getContext('2d');
+                                if (canvas.width !== v.videoWidth) {
+                                    canvas.width = v.videoWidth;
+                                    canvas.height = v.videoHeight;
+                                }
+                                ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+                            }
+                        }
+                    } else {
+                        lastTimestampRef.current = 0;
+                    }
+                    requestRef.current = requestAnimationFrame(render);
+                };
+
+                const requestRef = { current: requestAnimationFrame(render) };
+                return () => {
+                    cancelAnimationFrame(requestRef.current);
+                    if (videoRef.current) videoRef.current.src = "";
+                };
+            }, [isRunning, isHot, isFinished]);
+
+            // --- 計時器邏輯 ---
+            useEffect(() => {
+                if (isRunning && timeLeft > 0) {
+                    timerRef.current = setInterval(() => {
+                        setTimeLeft(prev => prev - 1);
+                    }, 1000);
+                } else if (timeLeft === 0) {
+                    handleStepEnd();
+                }
+                return () => clearInterval(timerRef.current);
+            }, [isRunning, timeLeft]);
+
+            const handleStepEnd = () => {
+                playNotification();
+                if (isHot) {
+                    setIsHot(false);
+                    setTimeLeft(STEP_TIME);
+                } else {
+                    if (currentCycle < TOTAL_CYCLES) {
+                        setCurrentCycle(prev => prev + 1);
+                        setIsHot(true);
+                        setTimeLeft(STEP_TIME);
+                    } else {
+                        setIsFinished(true);
+                        setIsRunning(false);
+                    }
+                }
+            };
+
+            const playNotification = () => {
+                try {
+                    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.connect(gain); gain.connect(audioCtx.destination);
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+                    osc.start(); osc.stop(audioCtx.currentTime + 0.5);
+                } catch (e) {}
+            };
+
+            // 切換開始/暫停
+            const toggleTimer = () => {
+                if (isFinished) {
+                    restartEverything();
+                    return;
+                }
+
+                // 解決行動裝置「動畫不動」的關鍵：第一次點擊時啟動解碼引擎
+                if (!isVideoUnlocked && videoRef.current) {
+                    const v = videoRef.current;
+                    v.play().then(() => {
+                        v.pause(); // 立即暫停，系統會因此允許後續的進度撥動
+                        setIsVideoUnlocked(true);
+                    }).catch(e => console.log("Engine unlock needed"));
+                }
+
+                setIsRunning(!isRunning);
+            };
+
+            // 只重設目前的步驟 (2分鐘)
+            const resetCurrentStep = () => {
+                setTimeLeft(STEP_TIME);
+                scrubTimeRef.current = 0;
+            };
+
+            // 全面重新開始 (從第 1 次循環開始)
+            const restartEverything = () => {
+                setIsRunning(false);
+                setIsHot(true);
+                setCurrentCycle(1);
+                setTimeLeft(STEP_TIME);
+                setIsFinished(false);
+                scrubTimeRef.current = 0;
+                // 確保回到初始狀態後，進度條同步重設
+            };
+
+            const skipStep = () => {
+                handleStepEnd();
+            };
+
+            const formatTime = (s) => {
+                const m = Math.floor(s / 60);
+                const sec = s % 60;
+                return `${m}:${sec.toString().padStart(2, '0')}`;
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-100 flex items-center justify-center p-2 font-sans overflow-hidden">
+                    <div className="w-full max-w-sm bg-white rounded-[2.5rem] shadow-xl overflow-hidden flex flex-col border border-gray-200">
+                        
+                        {/* 標題 */}
+                        <div className="pt-6 pb-2 text-center">
+                            <h1 className="text-2xl font-black text-gray-800 tracking-tight">
+                                完美水煮蛋 🥚
+                            </h1>
+                        </div>
+
+                        {/* 視覺展示窗 */}
+                        <div className={`mx-5 aspect-[16/10] rounded-3xl relative overflow-hidden transition-all duration-500 border-4 ${
+                            isFinished ? 'border-emerald-500' : (isHot ? 'border-orange-500' : 'border-sky-400')
+                        } bg-gray-50`}>
+                            
+                            <img 
+                                src={COLD_IMAGE_URL} 
+                                className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-500 ${(!isHot || isFinished) ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}
+                                alt="Cold phase"
+                            />
+
+                            <canvas 
+                                ref={canvasRef}
+                                className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-500 ${(isHot && !isFinished) ? 'opacity-100 z-10' : 'opacity-0 z-0'}`}
+                            />
+
+                            <div className={`absolute top-3 left-3 px-3 py-1 rounded-full text-[9px] font-black text-white z-20 shadow-sm uppercase tracking-widest ${
+                                isFinished ? 'bg-emerald-500' : (isHot ? 'bg-orange-600' : 'bg-sky-500')
+                            }`}>
+                                {isFinished ? 'Success' : (isHot ? '100°C' : '30°C')}
+                            </div>
+                        </div>
+
+                        {/* 狀態資訊 */}
+                        <div className="px-6 py-4 text-center">
+                            <div className="flex flex-col items-center">
+                                <div className="bg-gray-100 text-gray-500 text-[9px] font-black px-3 py-1 rounded-full mb-2 tracking-widest uppercase">
+                                    Cycle {currentCycle} / {TOTAL_CYCLES}
+                                </div>
+                                
+                                <h2 className={`text-lg font-bold mb-1 ${isFinished ? 'text-emerald-600' : 'text-gray-700'}`}>
+                                    {isFinished ? '烹飪完成！' : (isHot ? '🔥 加熱中' : '❄️ 冷卻中')}
+                                </h2>
+                                
+                                <div className="text-6xl font-mono font-black text-gray-800 leading-none my-4 tracking-tighter">
+                                    {isFinished ? 'DONE' : formatTime(timeLeft)}
+                                </div>
+                            </div>
+
+                            {/* 按鈕組 */}
+                            <div className="space-y-3">
+                                <button 
+                                    onClick={toggleTimer}
+                                    className={`w-full py-4 rounded-2xl flex items-center justify-center gap-2 text-white font-black text-xl shadow-lg active:scale-95 transition-all ${
+                                        isFinished ? 'bg-emerald-500' : (isRunning ? 'bg-amber-500' : 'bg-orange-500')
+                                    }`}
+                                >
+                                    {isRunning ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
+                                    {isFinished ? '重新開始' : (isRunning ? '暫停' : '開始計時')}
+                                </button>
+                                
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button 
+                                        onClick={resetCurrentStep}
+                                        className="py-3 rounded-xl bg-gray-50 text-gray-500 font-bold border border-gray-200 active:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-sm"
+                                    >
+                                        <RefreshCcw size={16} /> 重設此段
+                                    </button>
+                                    <button 
+                                        onClick={skipStep}
+                                        disabled={isFinished}
+                                        className="py-3 rounded-xl bg-gray-50 text-gray-500 font-bold border border-gray-200 flex items-center justify-center gap-2 text-sm disabled:opacity-30"
+                                    >
+                                        <SkipForward size={16} fill="currentColor" /> 跳過
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 底部進度條 */}
+                        <div className="px-8 pb-6 flex gap-1">
+                            {[...Array(TOTAL_CYCLES)].map((_, i) => (
+                                <div 
+                                    key={i} 
+                                    className={`h-1.5 flex-1 rounded-full transition-all duration-1000 ${
+                                        i + 1 < currentCycle ? 'bg-emerald-500' : 
+                                        (i + 1 === currentCycle && !isFinished ? 'bg-orange-400 animate-pulse' : 
+                                        (isFinished ? 'bg-emerald-400' : 'bg-gray-200'))
+                                    }`}
+                                />
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
